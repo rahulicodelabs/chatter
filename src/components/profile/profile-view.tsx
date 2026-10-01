@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { LOCALE } from "@/lib/format";
 import { Avatar } from "@/components/chat/avatar";
+import { PhotoViewer } from "@/components/profile/photo-viewer";
 import type { Profile } from "@/lib/types";
 
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024; // 2 MB
@@ -28,9 +29,13 @@ export function ProfileView({
   const [fullName, setFullName] = useState(profile.full_name ?? "");
   const [avatarUrl, setAvatarUrl] = useState(profile.avatar_url);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [viewing, setViewing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<Status>(null);
   const [dirty, setDirty] = useState(false);
+
+  const photoUrl = previewUrl ?? avatarUrl;
+  const displayName = profile.full_name || profile.username;
 
   function onFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -133,22 +138,53 @@ export function ProfileView({
         <div className="mx-auto flex max-w-md flex-col items-center gap-4 text-center">
           <button
             type="button"
-            onClick={isOwn ? () => fileRef.current?.click() : undefined}
-            disabled={!isOwn}
-            aria-label={isOwn ? "Change avatar" : undefined}
-            className={`group relative block ${isOwn ? "cursor-pointer" : "cursor-default"}`}
+            onClick={
+              photoUrl
+                ? () => setViewing(true)
+                : isOwn
+                  ? () => fileRef.current?.click()
+                  : undefined
+            }
+            disabled={!photoUrl && !isOwn}
+            aria-label={
+              photoUrl ? `View ${displayName}'s photo` : isOwn ? "Change avatar" : undefined
+            }
+            className={`group relative block ${
+              photoUrl || isOwn ? "cursor-pointer" : "cursor-default"
+            }`}
           >
             <Avatar
-              src={previewUrl ?? avatarUrl}
-              name={profile.full_name || profile.username}
+              src={photoUrl}
+              name={displayName}
               size="lg"
             />
-            {isOwn && (
+            {(photoUrl || isOwn) && (
               <span className="absolute inset-0 hidden items-center justify-center rounded-full bg-black/50 text-xs font-medium text-white group-hover:flex">
-                Change
+                {photoUrl ? "View" : "Change"}
               </span>
             )}
           </button>
+
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {photoUrl && (
+              <button
+                type="button"
+                onClick={() => setViewing(true)}
+                className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-surface-hover hover:text-foreground"
+              >
+                View profile photo
+              </button>
+            )}
+            {isOwn && (
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-surface-hover hover:text-foreground"
+              >
+                Change photo
+              </button>
+            )}
+          </div>
 
           <div>
             <p className="text-lg font-semibold">
@@ -235,6 +271,14 @@ export function ProfileView({
           )}
         </div>
       </div>
+
+      {viewing && photoUrl && (
+        <PhotoViewer
+          src={photoUrl}
+          alt={displayName}
+          onClose={() => setViewing(false)}
+        />
+      )}
     </div>
   );
 }

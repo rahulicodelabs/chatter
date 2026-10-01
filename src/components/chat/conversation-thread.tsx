@@ -6,7 +6,7 @@ import Image from "next/image";
 import { useChatContext } from "@/components/chat/chat-context";
 import { createClient } from "@/lib/supabase/client";
 import { formatMessageTime } from "@/lib/format";
-import { loadChatImage, uploadChatPhoto, type ChatImage } from "@/lib/images";
+import { loadChatAttachment, uploadChatAttachment, revokeAttachment, isVideoMessage, type ChatAttachment } from "@/lib/attachments";
 import { Avatar } from "@/components/chat/avatar";
 import { ReadTicks, type TickState } from "@/components/chat/read-ticks";
 import type {
@@ -33,12 +33,19 @@ function fitWithin(width: number, height: number, maxW: number, maxH: number) {
   };
 }
 
-/** Display size for a message photo; falls back to a 4:3 box. */
-function photoSize(message: Message): { width: number; height: number } {
+/** Display size for a message photo/video; falls back to a 4:3 box. */
+function attachmentSize(message: Message): { width: number; height: number } {
   if (message.image_width && message.image_height) {
     return fitWithin(message.image_width, message.image_height, 280, 340);
   }
   return { width: 280, height: 210 };
+}
+
+/** "3.2 MB" for the composer chip. */
+function formatFileSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
 }
 
 export function ConversationThread({
@@ -51,7 +58,7 @@ export function ConversationThread({
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [receipts, setReceipts] = useState<MessageDelivery[]>([]);
   const [draft, setDraft] = useState("");
-  const [pendingImage, setPendingImage] = useState<ChatImage | null>(null);
+  const [pendingAttachment, setPendingAttachment] = useState<ChatAttachment | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -256,16 +263,16 @@ export function ConversationThread({
   async function send(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const body = draft.trim();
-    const photo = pendingImage;
-    if ((!body && !photo) || sending) return;
+    const attachment = pendingAttachment;
+    if ((!body && !attachment) || sending) return;
 
     setSending(true);
     setError(null);
     setDraft("");
 
-    // Show the photo in the thread immediately while it uploads.
-    const optimisticId = photo ? crypto.randomUUID() : null;
-    if (photo && optimisticId) {
+    // Show the attachment in the thread immediately while it uploads.
+    const optimisticId = attachment ? crypto.randomUUID() : null;
+    if (attachment && optimisticId) {
       setMessages((prev) => [
         ...prev,
         {
@@ -273,9 +280,10 @@ export function ConversationThread({
           conversation_id: conversation.id,
           sender_id: user.id,
           body,
-          image_url: photo.dataUrl,
-          image_width: photo.width,
-          image_height: photo.height,
+          image_url: attachment.previewUrl,
+          image_width: attachment.width,
+          image_height: attachment.height,
+          video: attachment.kind === "video",
           created_at: new Date().toISOString(),
           sender: user,
           pending: true,
@@ -285,9 +293,10 @@ export function ConversationThread({
 
     const supabase = createClient();
     try {
-      let uploaded: { url: string; width: number; height: number } | null = null;
-      if (photo) {
-        uploaded = await uploadChatPhoto(supabase, user.id, photo);
+      let uploaded: { url: string; width: number | null; height: number | null } | null =
+        null;
+      if (attachment) {
+        uploaded = await uploadChatAttachment(supabase, user.id, attachment);
       }
 
       const { data, error: insertError } = await supabase
@@ -296,6 +305,8 @@ export function ConversationThread({
           conversation_id: conversation.id,
           sender_id: user.id,
           body,
+          // Image and video URLs share this column; the type is inferred
+          // from the file extension (no schema change needed).
           image_url: uploaded?.url ?? null,
           image_width: uploaded?.width ?? null,
           image_height: uploaded?.height ?? null,
@@ -314,7 +325,11 @@ export function ConversationThread({
           ? rest.map((m) => (m.id === saved.id ? saved : m))
           : [...rest, saved];
       });
-      setPendingImage(null);
+      setPendingAttachment(null);
+      if (attachment) {
+        // After React swaps in the server URL (a tick later), drop the blob.
+        setTimeout(() => revokeAttachment(attachment), 0);
+      }
       markRead(conversation.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Message could not be sent.");
@@ -327,15 +342,17 @@ export function ConversationThread({
     }
   }
 
-  function pickPhoto(event: React.ChangeEvent<HTMLInputElement>) {
+  function pickAttachment(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
     setError(null);
-    void loadChatImage(file)
-      .then((image) => setPendingImage(image))
+    void loadChatAttachment(file)
+      .then((attachment) => setPendingAttachment(attachment))
       .catch((err) =>
-        setError(err instanceof Error ? err.message : "Couldn't attach that photo.")
+        setError(
+          err instanceof Error ? err.message : "Couldn't attach that file."
+        )
       );
   }
 
@@ -450,7 +467,17 @@ export function ConversationThread({
                           : "rounded-bl-sm bg-bubble-other text-bubble-other-foreground"
                       }`}
                     >
-                      {message.image_url && (
+                      {message.image_url && isVideoMessage(message) && (
+                        <video
+                          src={message.image_url}
+                          controls
+                          playsInline
+                          preload="metadata"
+                          style={attachmentSize(message)}
+                          className="rounded-xl bg-black"
+                        />
+                      )}
+                      {message.image_url && !isVideoMessage(message) && (
                         <a
                           href={message.image_url}
                           target="_blank"
@@ -461,7 +488,7 @@ export function ConversationThread({
                           <Image
                             src={message.image_url}
                             alt={message.body || "Photo"}
-                            {...photoSize(message)}
+                            {...attachmentSize(message)}
                             className={`rounded-xl ${
                               message.image_width && message.image_height
                                 ? ""
@@ -512,27 +539,44 @@ export function ConversationThread({
         onSubmit={send}
         className="flex flex-col gap-2 border-t border-border bg-surface px-4 py-3"
       >
-        {pendingImage && (
+        {pendingAttachment && (
           <div className="flex items-center gap-2 self-start rounded-xl border border-border bg-background p-1.5">
-            <Image
-              src={pendingImage.dataUrl}
-              alt="Selected photo"
-              width={48}
-              height={48}
-              className="h-12 w-12 rounded-lg object-cover"
-              unoptimized
-            />
+            {pendingAttachment.kind === "video" ? (
+              <video
+                src={pendingAttachment.previewUrl}
+                muted
+                playsInline
+                preload="metadata"
+                className="h-12 w-12 rounded-lg bg-black object-cover"
+              />
+            ) : (
+              <Image
+                src={pendingAttachment.previewUrl}
+                alt="Selected photo"
+                width={48}
+                height={48}
+                className="h-12 w-12 rounded-lg object-cover"
+                unoptimized
+              />
+            )}
             <span className="min-w-0 pr-1">
-              <span className="block text-xs font-medium">Photo ready</span>
-              <span className="block text-[10px] text-muted-foreground">
-                Add a caption or send as-is
+              <span className="block text-xs font-medium">
+                {pendingAttachment.kind === "video" ? "Video ready" : "Photo ready"}
+              </span>
+              <span className="block truncate text-[10px] text-muted-foreground">
+                {pendingAttachment.kind === "video"
+                  ? `${pendingAttachment.name} · ${formatFileSize(pendingAttachment.size)}`
+                  : "Add a caption or send as-is"}
               </span>
             </span>
             <button
               type="button"
-              onClick={() => setPendingImage(null)}
+              onClick={() => {
+                if (pendingAttachment) revokeAttachment(pendingAttachment);
+                setPendingAttachment(null);
+              }}
               disabled={sending}
-              aria-label="Remove photo"
+              aria-label="Remove attachment"
               className="rounded-lg p-1.5 text-muted-foreground transition hover:text-foreground disabled:opacity-40"
             >
               ✕
@@ -543,17 +587,17 @@ export function ConversationThread({
           <input
             ref={fileRef}
             type="file"
-            accept="image/*"
-            onChange={pickPhoto}
+            accept="image/*,video/*"
+            onChange={pickAttachment}
             className="hidden"
-            aria-label="Choose a photo"
+            aria-label="Choose a photo or video"
           />
           <button
             type="button"
             onClick={() => fileRef.current?.click()}
-            disabled={sending || !!pendingImage}
-            aria-label="Attach a photo"
-            title="Attach a photo"
+            disabled={sending || !!pendingAttachment}
+            aria-label="Attach a photo or video"
+            title="Attach a photo or video"
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition hover:bg-surface-hover hover:text-foreground disabled:opacity-40"
           >
             <svg
@@ -566,9 +610,7 @@ export function ConversationThread({
               strokeLinejoin="round"
               aria-hidden
             >
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <circle cx="8.5" cy="8.5" r="1.5" />
-              <path d="m21 15-5-5L5 21" />
+              <path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l8.57-8.57a4 4 0 1 1 5.66 5.66l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
             </svg>
           </button>
           <input
@@ -580,10 +622,10 @@ export function ConversationThread({
           />
           <button
             type="submit"
-            disabled={sending || (!draft.trim() && !pendingImage)}
+            disabled={sending || (!draft.trim() && !pendingAttachment)}
             className="shrink-0 rounded-xl bg-accent px-4 py-2.5 text-sm font-medium text-accent-foreground transition hover:bg-accent-hover disabled:opacity-50"
           >
-            {sending ? (pendingImage ? "Uploading…" : "…") : "Send"}
+            {sending ? (pendingAttachment ? "Uploading…" : "…") : "Send"}
           </button>
         </div>
       </form>

@@ -55,6 +55,11 @@ export type Message = {
   sender?: PublicProfile;
   /** Client-only flag for messages appended before the DB confirms them. */
   pending?: boolean;
+  /**
+   * Client-only: this attachment is a video. Rows loaded from the DB carry no
+   * type column — those are detected from the URL extension instead.
+   */
+  video?: boolean;
 };
 
 /** One row per (message, recipient): when they received and read it. */

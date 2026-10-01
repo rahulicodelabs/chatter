@@ -2,14 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { normalizeMembers } from "@/lib/members";
+import { isVideoMessage } from "@/lib/attachments";
 import { ChatContext } from "@/components/chat/chat-context";
 import { ConversationList } from "@/components/chat/conversation-list";
 import { NewChatDialog } from "@/components/chat/new-chat-dialog";
+import { AccountDrawer } from "@/components/chat/account-drawer";
 import { Avatar } from "@/components/chat/avatar";
-import { SignOutButton } from "@/components/auth/sign-out-button";
 import type {
   ChatContextValue,
   ConversationMember,
@@ -47,6 +49,7 @@ export function ChatShell({
     groupMembers(initialMembers)
   );
   const [showNewChat, setShowNewChat] = useState(false);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
 
   // Read the latest pathname inside realtime callbacks without re-subscribing.
   const pathnameRef = useRef(pathname);
@@ -175,7 +178,12 @@ export function ChatShell({
                 ? {
                     ...c,
                     last_message:
-                      message.body || (message.image_url ? "📷 Photo" : null),
+                      message.body ||
+                      (message.image_url
+                        ? isVideoMessage(message)
+                          ? "🎬 Video"
+                          : "📷 Photo"
+                        : null),
                     last_message_at: message.created_at,
                     last_message_sender_id: message.sender_id,
                     last_activity: message.created_at,
@@ -266,19 +274,29 @@ export function ChatShell({
             showMainPane ? "hidden md:flex" : "flex"
           } w-full shrink-0 flex-col border-r border-border bg-surface md:w-80`}
         >
-          <header className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
-            <div className="flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-accent text-sm font-bold text-accent-foreground">
-                C
-              </span>
+          <header className="relative flex items-center gap-2 border-b border-border px-4 py-3">
+            {/* Centred on mobile; back in flow (left) from md up. */}
+            <Link
+              href="/"
+              className="absolute left-1/2 flex -translate-x-1/2 items-center gap-2 md:static md:translate-x-0"
+              title="Home"
+              aria-label="Chatter home"
+            >
+              <Image
+                src="/icons/icon-192.png"
+                alt=""
+                width={32}
+                height={32}
+                className="h-8 w-8 rounded-xl"
+              />
               <span className="font-semibold tracking-tight">Chatter</span>
-            </div>
+            </Link>
             <button
               type="button"
               onClick={() => setShowNewChat(true)}
               title="New chat"
               aria-label="New chat"
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-border text-lg leading-none text-muted-foreground transition hover:bg-surface-hover hover:text-foreground"
+              className="ml-auto flex h-8 w-8 items-center justify-center rounded-lg border border-border text-lg leading-none text-muted-foreground transition hover:bg-surface-hover hover:text-foreground"
             >
               +
             </button>
@@ -286,11 +304,14 @@ export function ChatShell({
 
           <ConversationList />
 
-          <footer className="flex items-center justify-between gap-2 border-t border-border px-4 py-3">
-            <Link
-              href={`/profile/${user.id}`}
-              className="group flex min-w-0 items-center gap-2"
-              title="Your profile"
+          <footer className="border-t border-border px-4 py-3">
+            <button
+              type="button"
+              onClick={() => setShowAccountMenu(true)}
+              className="group flex w-full min-w-0 items-center gap-2 rounded-lg text-left"
+              title="Account menu"
+              aria-haspopup="dialog"
+              aria-label="Open account menu"
             >
               <Avatar
                 src={user.avatar_url}
@@ -305,8 +326,7 @@ export function ChatShell({
                   @{user.username}
                 </span>
               </span>
-            </Link>
-            <SignOutButton />
+            </button>
           </footer>
         </aside>
 
@@ -319,6 +339,12 @@ export function ChatShell({
         </main>
 
         {showNewChat && <NewChatDialog onClose={() => setShowNewChat(false)} />}
+        {showAccountMenu && (
+          <AccountDrawer
+            user={user}
+            onClose={() => setShowAccountMenu(false)}
+          />
+        )}
       </div>
     </ChatContext.Provider>
   );

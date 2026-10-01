@@ -300,6 +300,8 @@ select
   case
     when lm.body is null then null
     when lm.body <> '' then lm.body
+    when lm.image_url ~* '\.(mp4|webm|mov|m4v|ogv|avi|mkv)([?#].*)?$'
+      then '🎬 Video'
     else '📷 Photo'
   end as last_message,
   lm.created_at as last_message_at,
