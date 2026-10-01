@@ -11,6 +11,6 @@ export const config = {
      * Run on every request except static assets and auth routes
      * (auth routes handle their own session exchange).
      */
-    "/((?!_next/static|_next/image|favicon.ico|api|auth|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon\\.ico|api|auth|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|webmanifest|txt|xml)$).*)",
   ],
 };

@@ -18,11 +18,21 @@ export const metadata: Metadata = {
     template: "%s · Chatter",
   },
   description: "Real-time direct and group messaging built with Next.js and Supabase.",
+  applicationName: "Chatter",
+  appleWebApp: {
+    capable: true,
+    title: "Chatter",
+    statusBarStyle: "black-translucent",
+  },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#4f46e5" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b1120" },
+  ],
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
