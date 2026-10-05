@@ -3,19 +3,32 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentProfile, getCurrentUser } from "@/lib/supabase/auth";
 import { normalizeMembers } from "@/lib/members";
 import { ConversationThread } from "@/components/chat/conversation-thread";
-import type { Conversation, Message } from "@/lib/types";
+import type { Conversation, Message, Profile } from "@/lib/types";
 
 export default async function ConversationPage(props: PageProps<"/chat/[id]">) {
   const { id } = await props.params;
 
   const supabase = await createClient();
 
-  // Auth verification, conversation data, and messages all start together:
-  // RLS gates every query (non-members simply get no rows), so nothing has to
-  // wait for the identity check. This replaces an old chain of three serial
-  // round trips (auth → membership/conversation → profile/members/messages).
+  // ONE parallel phase: identity verification, our own profile (keyed off
+  // the local session id and re-checked against the verified user below),
+  // the conversation, members, and messages. RLS gates every query while
+  // they run, so a non-member simply receives no rows. Previously this was
+  // three serial phases (auth → conversation chain → profile).
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
   const userPromise = getCurrentUser();
-  const [{ data: conversation }, { data: memberRows }, { data: messageRows }] =
+  const profilePromise = session
+    ? supabase
+        .from("profiles")
+        .select("id, username, full_name, avatar_url, created_at")
+        .eq("id", session.user.id)
+        .maybeSingle()
+    : Promise.resolve({ data: null });
+
+  const [{ data: conversation }, { data: memberRows }, { data: messageRows }, profileResult] =
     await Promise.all([
       supabase
         .from("conversations")
@@ -34,12 +47,16 @@ export default async function ConversationPage(props: PageProps<"/chat/[id]">) {
         .eq("conversation_id", id)
         .order("created_at", { ascending: false })
         .limit(100),
+      profilePromise,
     ]);
 
   const user = await userPromise;
   if (!user) redirect("/login");
 
-  const profile = await getCurrentProfile();
+  // Use the session-keyed row only when it matches the server-verified
+  // user; otherwise (missing/tampered cookie) fall back to the verified id.
+  let profile = profileResult.data as Profile | null;
+  if (!profile || profile.id !== user.id) profile = await getCurrentProfile();
   if (!profile) notFound();
 
   // The conversations SELECT policy is member-only, so a missing row here
