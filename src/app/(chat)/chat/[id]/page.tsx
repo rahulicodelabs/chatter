@@ -1,42 +1,27 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentProfile, getCurrentUser } from "@/lib/supabase/auth";
 import { normalizeMembers } from "@/lib/members";
 import { ConversationThread } from "@/components/chat/conversation-thread";
-import type { Conversation, Message, Profile } from "@/lib/types";
+import type { Conversation, Message } from "@/lib/types";
 
 export default async function ConversationPage(props: PageProps<"/chat/[id]">) {
   const { id } = await props.params;
 
   const supabase = await createClient();
-  const {
-    data: { user: authUser },
-  } = await supabase.auth.getUser();
-  if (!authUser) redirect("/login");
 
-  // Access check: you must be a member of this conversation.
-  const [{ data: membership }, { data: conversation }] = await Promise.all([
-    supabase
-      .from("conversation_members")
-      .select("conversation_id")
-      .eq("conversation_id", id)
-      .eq("user_id", authUser.id)
-      .maybeSingle(),
-    supabase
-      .from("conversations")
-      .select("id, type, title, created_at, created_by")
-      .eq("id", id)
-      .maybeSingle(),
-  ]);
-
-  if (!membership || !conversation) notFound();
-
-  const [{ data: profile }, { data: memberRows }, { data: messageRows }] =
+  // Auth verification, conversation data, and messages all start together:
+  // RLS gates every query (non-members simply get no rows), so nothing has to
+  // wait for the identity check. This replaces an old chain of three serial
+  // round trips (auth → membership/conversation → profile/members/messages).
+  const userPromise = getCurrentUser();
+  const [{ data: conversation }, { data: memberRows }, { data: messageRows }] =
     await Promise.all([
       supabase
-        .from("profiles")
-        .select("id, username, full_name, avatar_url, created_at")
-        .eq("id", authUser.id)
-        .single(),
+        .from("conversations")
+        .select("id, type, title, created_at, created_by")
+        .eq("id", id)
+        .maybeSingle(),
       supabase
         .from("conversation_members")
         .select(
@@ -51,7 +36,15 @@ export default async function ConversationPage(props: PageProps<"/chat/[id]">) {
         .limit(100),
     ]);
 
+  const user = await userPromise;
+  if (!user) redirect("/login");
+
+  const profile = await getCurrentProfile();
   if (!profile) notFound();
+
+  // The conversations SELECT policy is member-only, so a missing row here
+  // means "not a member" as well as "doesn't exist" → 404.
+  if (!conversation) notFound();
 
   // Query is newest-first; render oldest-first.
   const messages = ((messageRows ?? []) as Message[]).slice().reverse();
@@ -62,7 +55,7 @@ export default async function ConversationPage(props: PageProps<"/chat/[id]">) {
       conversation={conversation as Conversation}
       members={normalizeMembers(memberRows)}
       initialMessages={messages}
-      user={profile as Profile}
+      user={profile}
     />
   );
 }

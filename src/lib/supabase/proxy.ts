@@ -55,11 +55,16 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  // IMPORTANT: do not run code between createServerClient and getUser(),
-  // otherwise users may be randomly logged out.
+  // Local session read: a valid cookie resolves without any network call
+  // (auth-js only round-trips when the access token needs refreshing, and
+  // this middleware can persist the rotated cookies). This gate is for
+  // redirects only — routes still verify the user server-side via getUser(),
+  // and RLS protects the data either way.
   const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const user = session?.user ?? null;
 
   if (!user && !PUBLIC_PATHS.includes(pathname) && !isAuthRoute(pathname)) {
     const redirectUrl = request.nextUrl.clone();

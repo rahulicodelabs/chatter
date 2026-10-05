@@ -35,7 +35,7 @@ function groupMembers(rows: ConversationMember[]): Record<string, ConversationMe
   return map;
 }
 
-export function ChatShell({
+function ConnectedShell({
   user,
   initialConversations,
   initialMembers,
@@ -347,5 +347,153 @@ export function ChatShell({
         )}
       </div>
     </ChatContext.Provider>
+  );
+}
+
+/**
+ * Shell boot wrapper.
+ *
+ * Renders synchronously on the server (an instant skeleton, no data awaits)
+ * so route navigations commit immediately, then loads the shell's data — own
+ * profile, conversation list, members — once on the client. After that first
+ * load the ConnectedShell instance persists across navigations and realtime
+ * keeps it fresh; clicking between chats never re-fetches the sidebar.
+ */
+export function ChatShell({ children }: { children: React.ReactNode }) {
+  const [initial, setInitial] = useState<{
+    user: PublicProfile;
+    conversations: ConversationSummary[];
+    members: ConversationMember[];
+  } | null>(null);
+  const [missingProfile, setMissingProfile] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const supabase = createClient();
+
+    void (async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (cancelled) return;
+      if (!session) {
+        // The proxy already redirects unauthenticated requests; this covers
+        // sessions that disappear client-side (signed out in another tab).
+        window.location.replace("/login");
+        return;
+      }
+
+      const [profileRes, summariesRes] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, username, full_name, avatar_url, created_at")
+          .eq("id", session.user.id)
+          .maybeSingle(),
+        supabase
+          .from("conversation_summaries")
+          .select("*")
+          .eq("user_id", session.user.id)
+          .order("last_activity", { ascending: false }),
+      ]);
+      if (cancelled) return;
+
+      if (profileRes.error || summariesRes.error) {
+        // The cookie doesn't map to a reachable, valid session — drop it
+        // rather than rendering against a failing API.
+        await supabase.auth.signOut();
+        if (!cancelled) window.location.replace("/login");
+        return;
+      }
+
+      const profile = profileRes.data as PublicProfile | null;
+      if (!profile) {
+        // The auth trigger from supabase/schema.sql hasn't been installed.
+        setMissingProfile(true);
+        return;
+      }
+
+      const conversations = (summariesRes.data ?? []) as ConversationSummary[];
+      let members: ConversationMember[] = [];
+      if (conversations.length > 0) {
+        const { data: memberRows } = await supabase
+          .from("conversation_members")
+          .select(
+            "conversation_id, user_id, role, joined_at, profile:user_id(id, username, full_name, avatar_url)"
+          )
+          .in(
+            "conversation_id",
+            conversations.map((c) => c.id)
+          );
+        if (cancelled) return;
+        members = normalizeMembers(memberRows);
+      }
+
+      if (cancelled) return;
+      setInitial({ user: profile, conversations, members });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (missingProfile) return <NotInitialized />;
+  if (!initial) return <ShellSkeleton />;
+
+  return (
+    <ConnectedShell
+      user={initial.user}
+      initialConversations={initial.conversations}
+      initialMembers={initial.members}
+    >
+      {children}
+    </ConnectedShell>
+  );
+}
+
+/** Full-app skeleton shown while the shell fetches its first data. */
+function ShellSkeleton() {
+  return (
+    <div className="flex h-[100dvh] w-full overflow-hidden">
+      <aside className="flex w-full shrink-0 flex-col border-r border-border bg-surface md:w-80">
+        <header className="relative flex items-center gap-2 border-b border-border px-4 py-3">
+          <span className="absolute left-1/2 flex -translate-x-1/2 items-center gap-2 md:static md:translate-x-0">
+            <span className="h-8 w-8 animate-pulse rounded-xl bg-surface-hover" />
+            <span className="h-4 w-20 animate-pulse rounded bg-surface-hover" />
+          </span>
+          <span className="ml-auto block h-8 w-8 rounded-lg bg-surface-hover" />
+        </header>
+        <div className="flex-1 space-y-3 p-4">
+          {Array.from({ length: 6 }, (_, i) => (
+            <div
+              key={i}
+              className="h-12 animate-pulse rounded-xl bg-surface-hover"
+            />
+          ))}
+        </div>
+        <footer className="border-t border-border px-4 py-3">
+          <div className="h-10 animate-pulse rounded-lg bg-surface-hover" />
+        </footer>
+      </aside>
+      <main className="hidden min-h-0 min-w-0 flex-1 flex-col md:flex" />
+    </div>
+  );
+}
+
+/** Shown when the profile row for the signed-in user doesn't exist yet. */
+function NotInitialized() {
+  return (
+    <div className="flex h-[100dvh] items-center justify-center p-6">
+      <div className="max-w-md space-y-2 rounded-2xl border border-border bg-surface p-6 text-center shadow-sm">
+        <h1 className="text-lg font-semibold">Database not initialized</h1>
+        <p className="text-sm text-muted-foreground">
+          Your profile row doesn&apos;t exist yet. Run{" "}
+          <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+            supabase/schema.sql
+          </code>{" "}
+          in the Supabase SQL Editor, then sign out and create a new account.
+        </p>
+      </div>
+    </div>
   );
 }
