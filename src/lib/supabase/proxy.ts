@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSupabaseConfig } from "./config";
+import { readLockState } from "@/lib/app-lock";
 
 const PUBLIC_PATHS = ["/login", "/signup"];
 
@@ -78,6 +79,30 @@ export async function updateSession(request: NextRequest) {
     redirectUrl.pathname = "/";
     redirectUrl.search = "";
     return NextResponse.redirect(redirectUrl);
+  }
+
+  // Per-user app lock: a signed-in account with a passcode must unlock
+  // this device (valid chatter-lock-ok cookie) before any app page.
+  if (user && pathname !== "/lock") {
+    try {
+      const lock = await readLockState(
+        (name) => request.cookies.get(name)?.value,
+        user.id
+      );
+      if (lock.required && !lock.unlocked) {
+        const lockUrl = request.nextUrl.clone();
+        lockUrl.pathname = "/lock";
+        lockUrl.search = `?next=${encodeURIComponent(pathname + request.nextUrl.search)}`;
+        return NextResponse.redirect(lockUrl);
+      }
+    } catch (error) {
+      // App lock is enabled without APP_LOCK_SECRET — fail closed with setup help.
+      console.error("app-lock proxy:", error);
+      const lockUrl = request.nextUrl.clone();
+      lockUrl.pathname = "/lock";
+      lockUrl.search = "?e=config";
+      return NextResponse.redirect(lockUrl);
+    }
   }
 
   return supabaseResponse;

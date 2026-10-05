@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { normalizeMembers } from "@/lib/members";
 import { isVideoMessage } from "@/lib/attachments";
 import { ChatContext } from "@/components/chat/chat-context";
+import { ensureLockAction } from "@/lib/app-lock-actions";
 import { ConversationList } from "@/components/chat/conversation-list";
 import { NewChatDialog } from "@/components/chat/new-chat-dialog";
 import { AccountDrawer } from "@/components/chat/account-drawer";
@@ -57,6 +58,42 @@ function ConnectedShell({
   useEffect(() => {
     pathnameRef.current = pathname;
   }, [pathname]);
+
+  // App lock self-heal: sessions that were already open elsewhere learn about
+  // a lock enabled on another device (and stale hints get cleared). Runs in
+  // the background so it never delays first paint; the proxy does the real
+  // enforcement on the next request.
+  useEffect(() => {
+    let alive = true;
+    let lastRun = 0;
+
+    async function check() {
+      if (window.location.pathname.startsWith("/lock")) return;
+      const now = Date.now();
+      if (now - lastRun < 30_000) return;
+      lastRun = now;
+      try {
+        const { locked } = await ensureLockAction();
+        if (alive && locked && !window.location.pathname.startsWith("/lock")) {
+          window.location.replace(
+            `/lock?next=${encodeURIComponent(window.location.pathname + window.location.search)}`
+          );
+        }
+      } catch {
+        // Best-effort — the proxy still gates every navigation.
+      }
+    }
+
+    void check();
+    function onVisibility() {
+      if (document.visibilityState === "visible") void check();
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      alive = false;
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
 
   const refreshConversations = useCallback(async () => {
     const supabase = createClient();

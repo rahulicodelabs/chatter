@@ -62,6 +62,13 @@ export function AccountDrawer({
           >
             View profile
           </Link>
+          <Link
+            href={`/profile/${user.id}#app-lock`}
+            onClick={onClose}
+            className="flex w-full items-center justify-center rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition hover:bg-surface-hover hover:text-foreground"
+          >
+            App lock
+          </Link>
         </div>
 
         <div className="border-t border-border p-4">
