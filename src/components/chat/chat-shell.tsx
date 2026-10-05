@@ -11,6 +11,7 @@ import { ChatContext } from "@/components/chat/chat-context";
 import { ConversationList } from "@/components/chat/conversation-list";
 import { NewChatDialog } from "@/components/chat/new-chat-dialog";
 import { AccountDrawer } from "@/components/chat/account-drawer";
+import { ThemeToggle } from "@/components/chat/theme-toggle";
 import { Avatar } from "@/components/chat/avatar";
 import type {
   ChatContextValue,
@@ -305,28 +306,31 @@ function ConnectedShell({
           <ConversationList />
 
           <footer className="border-t border-border px-4 py-3">
-            <button
-              type="button"
-              onClick={() => setShowAccountMenu(true)}
-              className="group flex w-full min-w-0 items-center gap-2 rounded-lg text-left"
-              title="Account menu"
-              aria-haspopup="dialog"
-              aria-label="Open account menu"
-            >
-              <Avatar
-                src={user.avatar_url}
-                name={user.full_name || user.username}
-                size="sm"
-              />
-              <span className="min-w-0 text-left">
-                <span className="block truncate text-sm font-medium group-hover:underline">
-                  {user.full_name || user.username}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAccountMenu(true)}
+                className="group flex min-w-0 flex-1 items-center gap-2 rounded-lg text-left"
+                title="Account menu"
+                aria-haspopup="dialog"
+                aria-label="Open account menu"
+              >
+                <Avatar
+                  src={user.avatar_url}
+                  name={user.full_name || user.username}
+                  size="sm"
+                />
+                <span className="min-w-0 text-left">
+                  <span className="block truncate text-sm font-medium group-hover:underline">
+                    {user.full_name || user.username}
+                  </span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    @{user.username}
+                  </span>
                 </span>
-                <span className="block truncate text-xs text-muted-foreground">
-                  @{user.username}
-                </span>
-              </span>
-            </button>
+              </button>
+              <ThemeToggle />
+            </div>
           </footer>
         </aside>
 
@@ -458,21 +462,21 @@ function ShellSkeleton() {
       <aside className="flex w-full shrink-0 flex-col border-r border-border bg-surface md:w-80">
         <header className="relative flex items-center gap-2 border-b border-border px-4 py-3">
           <span className="absolute left-1/2 flex -translate-x-1/2 items-center gap-2 md:static md:translate-x-0">
-            <span className="h-8 w-8 animate-pulse rounded-xl bg-surface-hover" />
-            <span className="h-4 w-20 animate-pulse rounded bg-surface-hover" />
+            <span className="h-8 w-8 animate-pulse rounded-xl bg-skeleton" />
+            <span className="h-4 w-20 animate-pulse rounded bg-skeleton" />
           </span>
-          <span className="ml-auto block h-8 w-8 rounded-lg bg-surface-hover" />
+          <span className="ml-auto block h-8 w-8 rounded-lg bg-skeleton" />
         </header>
         <div className="flex-1 space-y-3 p-4">
           {Array.from({ length: 6 }, (_, i) => (
             <div
               key={i}
-              className="h-12 animate-pulse rounded-xl bg-surface-hover"
+              className="h-12 animate-pulse rounded-xl bg-skeleton"
             />
           ))}
         </div>
         <footer className="border-t border-border px-4 py-3">
-          <div className="h-10 animate-pulse rounded-lg bg-surface-hover" />
+          <div className="h-10 animate-pulse rounded-lg bg-skeleton" />
         </footer>
       </aside>
       <main className="hidden min-h-0 min-w-0 flex-1 flex-col md:flex" />

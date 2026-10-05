@@ -41,7 +41,16 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {/* Apply the saved theme before first paint to avoid a flash. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              'try{var t=localStorage.getItem("chatter-theme");if(t==="dark"||t==="light"){document.documentElement.dataset.theme=t}}catch(e){}',
+          }}
+        />
+        {children}
+      </body>
     </html>
   );
 }

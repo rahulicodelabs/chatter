@@ -15,6 +15,7 @@
   --color-bubble-own-foreground: var(--bubble-own-foreground);
   --color-bubble-other: var(--bubble-other);
   --color-bubble-other-foreground: var(--bubble-other-foreground);
+  --color-skeleton: var(--skeleton);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -34,10 +35,12 @@
   --bubble-own-foreground: #ffffff;
   --bubble-other: #e2e8f0;
   --bubble-other-foreground: #0f172a;
+  --skeleton: #cbd5e1;
 }
 
+/* Dark palette: follows the system, unless the user picked light in-app. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --background: #0b1120;
     --foreground: #e2e8f0;
     --surface: #111a2e;
@@ -52,7 +55,27 @@
     --bubble-own-foreground: #ffffff;
     --bubble-other: #1e293b;
     --bubble-other-foreground: #e2e8f0;
+    --skeleton: #1a2540;
   }
+}
+
+/* Explicit in-app choice overrides the system preference. */
+:root[data-theme="dark"] {
+  --background: #0b1120;
+  --foreground: #e2e8f0;
+  --surface: #111a2e;
+  --surface-hover: #1a2540;
+  --border: #24304b;
+  --muted: #1a2540;
+  --muted-foreground: #94a3b8;
+  --accent: #6366f1;
+  --accent-hover: #818cf8;
+  --accent-foreground: #ffffff;
+  --bubble-own: #4f46e5;
+  --bubble-own-foreground: #ffffff;
+  --bubble-other: #1e293b;
+  --bubble-other-foreground: #e2e8f0;
+  --skeleton: #1a2540;
 }
 
 html,

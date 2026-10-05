@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { formatMessageTime } from "@/lib/format";
 import { loadChatAttachment, uploadChatAttachment, revokeAttachment, isVideoMessage, type ChatAttachment } from "@/lib/attachments";
 import { Avatar } from "@/components/chat/avatar";
+import { PhotoViewer } from "@/components/profile/photo-viewer";
 import { ReadTicks, type TickState } from "@/components/chat/read-ticks";
 import type {
   Conversation,
@@ -61,6 +62,10 @@ export function ConversationThread({
   const [pendingAttachment, setPendingAttachment] = useState<ChatAttachment | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [viewingPhoto, setViewingPhoto] = useState<{
+    src: string;
+    alt: string;
+  } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const messageIdsRef = useRef<Set<string>>(
@@ -429,6 +434,11 @@ export function ConversationThread({
                 ? senderProfile.full_name || senderProfile.username
                 : "Unknown";
               const tickState = tickStateFor(message);
+              // Non-video attachments open in the same lightbox as profile photos.
+              const photoUrl =
+                message.image_url && !isVideoMessage(message)
+                  ? message.image_url
+                  : null;
 
               return (
                 <li
@@ -477,16 +487,20 @@ export function ConversationThread({
                           className="rounded-xl bg-black"
                         />
                       )}
-                      {message.image_url && !isVideoMessage(message) && (
-                        <a
-                          href={message.image_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title="Open photo"
+                      {photoUrl && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setViewingPhoto({
+                              src: photoUrl,
+                              alt: message.body || "Photo",
+                            })
+                          }
+                          title="View photo"
                           className="block"
                         >
                           <Image
-                            src={message.image_url}
+                            src={photoUrl}
                             alt={message.body || "Photo"}
                             {...attachmentSize(message)}
                             className={`rounded-xl ${
@@ -496,7 +510,7 @@ export function ConversationThread({
                             }`}
                             sizes="(max-width: 768px) 70vw, 280px"
                           />
-                        </a>
+                        </button>
                       )}
                       {message.body && (
                         <p
@@ -629,6 +643,14 @@ export function ConversationThread({
           </button>
         </div>
       </form>
+
+      {viewingPhoto && (
+        <PhotoViewer
+          src={viewingPhoto.src}
+          alt={viewingPhoto.alt}
+          onClose={() => setViewingPhoto(null)}
+        />
+      )}
     </div>
   );
 }
