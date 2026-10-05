@@ -36,11 +36,12 @@ export function PhotoViewer({
         aria-label={`${alt} photo`}
         className="relative z-10 flex w-full max-w-2xl flex-col items-center gap-3"
       >
+        {/* In-flow above the image so it never overlaps the photo. */}
         <button
           type="button"
           aria-label="Close photo"
           onClick={onClose}
-          className="absolute -top-1 right-0 flex h-9 w-9 items-center justify-center rounded-full bg-black/50 text-white transition hover:bg-black/70"
+          className="flex h-9 w-9 items-center justify-center self-end rounded-full bg-black/50 text-white transition hover:bg-black/70"
         >
           ✕
         </button>
