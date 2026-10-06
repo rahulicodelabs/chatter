@@ -7,7 +7,6 @@ import { createClient } from "@/lib/supabase/client";
 import { LOCALE } from "@/lib/format";
 import { Avatar } from "@/components/chat/avatar";
 import { PhotoViewer } from "@/components/profile/photo-viewer";
-import { AppLockCard } from "@/components/auth/app-lock-card";
 import type { Profile } from "@/lib/types";
 
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024; // 2 MB
@@ -238,8 +237,6 @@ export function ProfileView({
                 {joined}
               </p>
             </div>
-
-            {isOwn && <AppLockCard />}
           </div>
 
           {isOwn && (

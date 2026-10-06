@@ -10,9 +10,11 @@ import type { PublicProfile } from "@/lib/types";
 export function AccountDrawer({
   user,
   onClose,
+  onAppLock,
 }: {
   user: PublicProfile;
   onClose: () => void;
+  onAppLock: () => void;
 }) {
   // Escape closes the drawer.
   useEffect(() => {
@@ -58,17 +60,20 @@ export function AccountDrawer({
           <Link
             href={`/profile/${user.id}`}
             onClick={onClose}
-            className="mt-4 flex w-full items-center justify-center rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition hover:bg-surface-hover hover:text-foreground"
+            className="mt-4 flex w-full items-center justify-start rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition hover:bg-surface-hover hover:text-foreground"
           >
             View profile
           </Link>
-          <Link
-            href={`/profile/${user.id}#app-lock`}
-            onClick={onClose}
-            className="flex w-full items-center justify-center rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition hover:bg-surface-hover hover:text-foreground"
+          <button
+            type="button"
+            onClick={() => {
+              onClose();
+              onAppLock();
+            }}
+            className="flex w-full items-center justify-start rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition hover:bg-surface-hover hover:text-foreground"
           >
             App lock
-          </Link>
+          </button>
         </div>
 
         <div className="border-t border-border p-4">

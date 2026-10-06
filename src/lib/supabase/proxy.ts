@@ -83,7 +83,15 @@ export async function updateSession(request: NextRequest) {
 
   // Per-user app lock: a signed-in account with a passcode must unlock
   // this device (valid chatter-lock-ok cookie) before any app page.
-  if (user && pathname !== "/lock") {
+  //
+  // Server-action POSTs are exempt: a 307 on an action request breaks the
+  // action protocol (the client follows the redirect but can't dispatch the
+  // action there, so it fails with "unexpected response") — that would
+  // silently kill the shell's ensureLock self-heal, which is exactly what
+  // bounces stale tabs to /lock. Pages and RSC navigations stay gated.
+  const isActionPost =
+    request.method === "POST" && request.headers.has("next-action");
+  if (user && pathname !== "/lock" && !isActionPost) {
     try {
       const lock = await readLockState(
         (name) => request.cookies.get(name)?.value,

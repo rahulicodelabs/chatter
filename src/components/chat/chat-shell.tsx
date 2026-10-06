@@ -8,10 +8,16 @@ import { createClient } from "@/lib/supabase/client";
 import { normalizeMembers } from "@/lib/members";
 import { isVideoMessage } from "@/lib/attachments";
 import { ChatContext } from "@/components/chat/chat-context";
-import { ensureLockAction } from "@/lib/app-lock-actions";
+import { ensureLockAction, relockAction } from "@/lib/app-lock-actions";
+import {
+  RELOCK_FLAG_KEY,
+  RELOCK_GRACE_MS_DESKTOP,
+  RELOCK_GRACE_MS_TOUCH,
+} from "@/lib/app-lock";
 import { ConversationList } from "@/components/chat/conversation-list";
 import { NewChatDialog } from "@/components/chat/new-chat-dialog";
 import { AccountDrawer } from "@/components/chat/account-drawer";
+import { AppLockDialog } from "@/components/auth/app-lock-dialog";
 import { ThemeToggle } from "@/components/chat/theme-toggle";
 import { Avatar } from "@/components/chat/avatar";
 import type {
@@ -52,6 +58,7 @@ function ConnectedShell({
   );
   const [showNewChat, setShowNewChat] = useState(false);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const [showLockSettings, setShowLockSettings] = useState(false);
 
   // Read the latest pathname inside realtime callbacks without re-subscribing.
   const pathnameRef = useRef(pathname);
@@ -59,39 +66,119 @@ function ConnectedShell({
     pathnameRef.current = pathname;
   }, [pathname]);
 
-  // App lock self-heal: sessions that were already open elsewhere learn about
-  // a lock enabled on another device (and stale hints get cleared). Runs in
-  // the background so it never delays first paint; the proxy does the real
-  // enforcement on the next request.
+  // App lock lifecycle:
+  //  - boot:      relock if the previous session was closed/killed from the
+  //               background (localStorage flag), and learn about locks
+  //               enabled on other devices (ensureLock).
+  //  - hidden:    set the flag + start a grace timer that relocks if it
+  //               expires (the flag survives a process kill).
+  //  - visible:   cancel the grace timer for a quick switch, or relock when
+  //               the app stayed backgrounded longer than the grace.
+  //  - pagehide:  document is going away (tab close / kill) — set the flag
+  //               and try to clear the unlock cookie while we still can.
   useEffect(() => {
-    let alive = true;
     let lastRun = 0;
+    let graceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function lockUrl() {
+      return `/lock?next=${encodeURIComponent(
+        window.location.pathname + window.location.search
+      )}`;
+    }
+
+    function graceMs() {
+      return window.matchMedia("(pointer: coarse)").matches
+        ? RELOCK_GRACE_MS_TOUCH
+        : RELOCK_GRACE_MS_DESKTOP;
+    }
+
+    function markHidden() {
+      try {
+        localStorage.setItem(RELOCK_FLAG_KEY, String(Date.now()));
+      } catch {
+        // Storage unavailable (private mode) — session cookie still applies.
+      }
+    }
+
+    async function relock() {
+      // Clear the unlock first — if this fails (offline), the flag stays so
+      // the next boot retries instead of silently skipping the relock.
+      await relockAction();
+      localStorage.removeItem(RELOCK_FLAG_KEY);
+      // Deliberately NOT gated on `alive`: a StrictMode/dev remount (or an
+      // unmount mid-flight) must still finish the redirect — landing on
+      // /lock is always safe, it re-checks the session itself.
+      if (!window.location.pathname.startsWith("/lock")) {
+        window.location.replace(lockUrl());
+      }
+    }
 
     async function check() {
       if (window.location.pathname.startsWith("/lock")) return;
+
+      // Previous session ended while backgrounded → force a fresh unlock.
+      if (localStorage.getItem(RELOCK_FLAG_KEY)) {
+        try {
+          await relock();
+        } catch {
+          // Keep the flag; retried on the next boot/foreground.
+        }
+        return;
+      }
+
       const now = Date.now();
       if (now - lastRun < 30_000) return;
       lastRun = now;
       try {
         const { locked } = await ensureLockAction();
-        if (alive && locked && !window.location.pathname.startsWith("/lock")) {
-          window.location.replace(
-            `/lock?next=${encodeURIComponent(window.location.pathname + window.location.search)}`
-          );
+        // Deliberately NOT gated on effect-alive: in dev StrictMode the first
+        // instance's response arrives after its cleanup, and dropping the
+        // guard (landing on /lock is always safe) keeps the bounce reliable.
+        if (locked && !window.location.pathname.startsWith("/lock")) {
+          window.location.replace(lockUrl());
         }
       } catch {
         // Best-effort — the proxy still gates every navigation.
       }
     }
 
-    void check();
     function onVisibility() {
-      if (document.visibilityState === "visible") void check();
+      if (document.visibilityState === "hidden") {
+        markHidden();
+        if (graceTimer) clearTimeout(graceTimer);
+        graceTimer = setTimeout(() => void relock().catch(() => {}), graceMs());
+        return;
+      }
+
+      // Visible again.
+      if (graceTimer) {
+        clearTimeout(graceTimer);
+        graceTimer = null;
+      }
+      const hiddenAt = Number(localStorage.getItem(RELOCK_FLAG_KEY) ?? 0);
+      if (hiddenAt && Date.now() - hiddenAt >= graceMs()) {
+        void relock().catch(() => {});
+        return;
+      }
+      // Quick switch under the grace period — stay unlocked.
+      if (hiddenAt) localStorage.removeItem(RELOCK_FLAG_KEY);
+      void check();
     }
+
+    function onPageHide() {
+      if (document.visibilityState === "hidden") {
+        markHidden();
+        void relockAction().catch(() => {});
+      }
+    }
+
+    void check();
     document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", onPageHide);
     return () => {
-      alive = false;
+      if (graceTimer) clearTimeout(graceTimer);
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", onPageHide);
     };
   }, []);
 
@@ -384,7 +471,11 @@ function ConnectedShell({
           <AccountDrawer
             user={user}
             onClose={() => setShowAccountMenu(false)}
+            onAppLock={() => setShowLockSettings(true)}
           />
+        )}
+        {showLockSettings && (
+          <AppLockDialog onClose={() => setShowLockSettings(false)} />
         )}
       </div>
     </ChatContext.Provider>

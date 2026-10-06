@@ -8,6 +8,7 @@ import {
   unlockAction,
   type LockActionResult,
 } from "@/lib/app-lock-actions";
+import { RELOCK_FLAG_KEY } from "@/lib/app-lock";
 
 /**
  * Full-screen passcode gate rendered by /lock. Success navigates to ?next=
@@ -36,6 +37,12 @@ export function LockScreen({
   }, [mode]);
 
   function done() {
+    // You just unlocked — any leftover background/kill flag is stale.
+    try {
+      localStorage.removeItem(RELOCK_FLAG_KEY);
+    } catch {
+      // Storage unavailable — harmless.
+    }
     router.replace(next);
     router.refresh();
   }

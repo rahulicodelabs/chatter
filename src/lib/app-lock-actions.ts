@@ -64,13 +64,15 @@ async function setLockCookies(userId: string) {
   const req = await signLockCookie("req", userId, LOCK_REQ_TTL_SECONDS);
   const ok = await signLockCookie("ok", userId, LOCK_OK_TTL_SECONDS);
   store.set(LOCK_REQ_COOKIE, req.value, lockCookieOptions(req.maxAge));
-  store.set(LOCK_OK_COOKIE, ok.value, lockCookieOptions(ok.maxAge));
+  // No maxAge: session-scoped, so closing the app/browser drops the unlock.
+  store.set(LOCK_OK_COOKIE, ok.value, lockCookieOptions());
 }
 
 async function setOkCookie(userId: string) {
   const store = await cookies();
   const ok = await signLockCookie("ok", userId, LOCK_OK_TTL_SECONDS);
-  store.set(LOCK_OK_COOKIE, ok.value, lockCookieOptions(ok.maxAge));
+  // No maxAge: session-scoped, so closing the app/browser drops the unlock.
+  store.set(LOCK_OK_COOKIE, ok.value, lockCookieOptions());
 }
 
 function clearLockCookies(store: Awaited<ReturnType<typeof cookies>>) {
@@ -269,6 +271,15 @@ export async function getLockStatusAction(): Promise<{ hasPasscode: boolean }> {
   const user = await getCurrentUser();
   if (!user) return { hasPasscode: false };
   return { hasPasscode: (await readPasscodeHash(user.id)) !== null };
+}
+
+/**
+ * Force re-lock this device (clears the unlock cookie). Called by the shell
+ * when the app is backgrounded beyond the grace period, closed, or killed.
+ * Only ever locks — never unlocks — so it needs no auth of its own.
+ */
+export async function relockAction(): Promise<void> {
+  (await cookies()).delete(LOCK_OK_COOKIE);
 }
 
 /**

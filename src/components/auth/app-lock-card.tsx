@@ -13,8 +13,9 @@ type Status = "loading" | "off" | "on";
 type Panel = "none" | "enable" | "change" | "disable";
 
 /**
- * "App lock" settings card — shown on the signed-in user's own profile.
- * Enable / change / disable the 4–8 digit passcode the app asks for on open.
+ * "App lock" settings body — shown inside the App lock dialog (opened from
+ * the account drawer). Enable / change / disable the 4–8 digit passcode the
+ * app asks for on open.
  */
 export function AppLockCard() {
   const [status, setStatus] = useState<Status>("loading");
@@ -115,21 +116,15 @@ export function AppLockCard() {
   );
 
   return (
-    <section
-      id="app-lock"
-      className="scroll-mt-4 rounded-xl border border-border bg-muted/30 p-4"
-    >
+    <section>
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-medium">App lock</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {status === "loading"
-              ? "Checking status…"
-              : status === "on"
-                ? "Ask for a passcode whenever Chatter opens — on any device."
-                : "Protect this account with a passcode whenever the app opens."}
-          </p>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          {status === "loading"
+            ? "Checking status…"
+            : status === "on"
+              ? "Ask for a passcode whenever Chatter opens — on any device."
+              : "Protect this account with a passcode whenever the app opens."}
+        </p>
         <span
           className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${
             status === "on"

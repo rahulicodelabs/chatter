@@ -10,22 +10,38 @@
  *                     re-issued by ensureLock; signed per user so one
  *                     account's lock never applies to another on a shared
  *                     device)
- *   chatter-lock-ok   "this device unlocked successfully" (12 h TTL —
- *                     changing the passcode keeps working, but old *ok*
- *                     cookies are simply re-issued on next unlock; deleting
- *                     the passcode invalidates the gate itself)
+ *   chatter-lock-ok   "this device unlocked successfully" — a SESSION cookie
+ *                     (no Max-Age): it disappears when the browser/app
+ *                     session ends, which is the primary "closed the app"
+ *                     signal. Its signed payload still expires after
+ *                     LOCK_OK_TTL_SECONDS as an absolute cap, and the shell
+ *                     force-relocks on background/kill via a localStorage
+ *                     flag (see chat-shell).
  */
 
 export const LOCK_REQ_COOKIE = "chatter-lock-req";
 export const LOCK_OK_COOKIE = "chatter-lock-ok";
 
-/** An unlock lasts at most 12 hours, then the passcode is asked again. */
+/**
+ * Unlock validity window. The cookie itself is session-scoped (removed when
+ * the app/browser session ends); this is the signed-expiry cap inside the
+ * cookie value, so a long-running browser session still re-locks eventually.
+ */
 export const LOCK_OK_TTL_SECONDS = 12 * 60 * 60;
 /** The "lock enabled" hint survives ~6 months; ensureLock re-issues it. */
 export const LOCK_REQ_TTL_SECONDS = 180 * 24 * 60 * 60;
 
 /** App passcode: 4–8 digits. */
 export const PIN_PATTERN = /^\d{4,8}$/;
+
+/** Time the app may stay backgrounded before it relocks on return. */
+export const RELOCK_GRACE_MS_TOUCH = 10_000;
+export const RELOCK_GRACE_MS_DESKTOP = 30_000;
+
+/** localStorage flag: set when the app is hidden, so a later cold start can
+ *  tell it was closed from the background (works even if the process is
+ *  killed before any async cleanup can run). */
+export const RELOCK_FLAG_KEY = "chatter-relock";
 
 const PBKDF2_ITERATIONS = 600_000;
 const enc = new TextEncoder();
@@ -185,13 +201,15 @@ export async function readLockState(
   return { required, unlocked };
 }
 
-export function lockCookieOptions(maxAge: number) {
+export function lockCookieOptions(maxAge?: number) {
   return {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax" as const,
     path: "/",
-    maxAge,
+    // Omitting maxAge makes the cookie session-scoped: the browser drops it
+    // when the app/browser session ends (the "app closed" signal).
+    ...(maxAge !== undefined ? { maxAge } : {}),
   };
 }
 
