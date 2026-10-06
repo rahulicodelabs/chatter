@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getCurrentUser } from "@/lib/supabase/auth";
-import { readLockState, sanitizeNext } from "@/lib/app-lock";
+import { readLockState, sanitizeNext, RELOCK_FLAG_COOKIE } from "@/lib/app-lock";
 import { LockScreen } from "@/components/auth/lock-screen";
 
 export const metadata = {
@@ -29,11 +29,13 @@ export default async function LockPage(props: PageProps<"/lock">) {
 
   let required = false;
   let unlocked = false;
+  let relockFlag = false;
   try {
     const store = await cookies();
     const state = await readLockState((name) => store.get(name)?.value, user.id);
     required = state.required;
     unlocked = state.unlocked;
+    relockFlag = Boolean(store.get(RELOCK_FLAG_COOKIE)?.value);
   } catch (error) {
     // APP_LOCK_SECRET missing — show setup guidance instead of failing.
     console.error("app-lock page:", error);
@@ -41,8 +43,11 @@ export default async function LockPage(props: PageProps<"/lock">) {
   }
 
   // Not actually locked (stale link / just unlocked) — go where they wanted.
+  // EXCEPT a pending relock flag (app closed from the background): the ok
+  // cookie can outlive that close, but the user must still re-enter the
+  // passcode. Redirecting here would also loop against the proxy's gate.
   // NOTE: redirect() throws NEXT_REDIRECT, so it must stay outside the try.
-  if (!required || unlocked) redirect(next);
+  if (!required || (unlocked && !relockFlag)) redirect(next);
 
   return <LockScreen next={next} email={email} />;
 }

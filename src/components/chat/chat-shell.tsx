@@ -13,6 +13,8 @@ import {
   RELOCK_FLAG_KEY,
   RELOCK_GRACE_MS_DESKTOP,
   RELOCK_GRACE_MS_TOUCH,
+  clearRelockFlag,
+  setRelockFlag,
 } from "@/lib/app-lock";
 import { ConversationList } from "@/components/chat/conversation-list";
 import { NewChatDialog } from "@/components/chat/new-chat-dialog";
@@ -93,18 +95,16 @@ function ConnectedShell({
     }
 
     function markHidden() {
-      try {
-        localStorage.setItem(RELOCK_FLAG_KEY, String(Date.now()));
-      } catch {
-        // Storage unavailable (private mode) — session cookie still applies.
-      }
+      // localStorage for this document's checks; cookie mirror so the proxy
+      // gates the NEXT document request before it can render anything.
+      setRelockFlag();
     }
 
     async function relock() {
       // Clear the unlock first — if this fails (offline), the flag stays so
       // the next boot retries instead of silently skipping the relock.
       await relockAction();
-      localStorage.removeItem(RELOCK_FLAG_KEY);
+      clearRelockFlag();
       // Deliberately NOT gated on `alive`: a StrictMode/dev remount (or an
       // unmount mid-flight) must still finish the redirect — landing on
       // /lock is always safe, it re-checks the session itself.
@@ -117,28 +117,34 @@ function ConnectedShell({
       if (window.location.pathname.startsWith("/lock")) return;
 
       // Previous session ended while backgrounded → force a fresh unlock.
-      if (localStorage.getItem(RELOCK_FLAG_KEY)) {
+      const hasFlag = Boolean(localStorage.getItem(RELOCK_FLAG_KEY));
+      // The flag path must not be throttled (it's a pending lock); only the
+      // regular ensureLock self-heal is rate-limited.
+      if (!hasFlag) {
+        const now = Date.now();
+        if (now - lastRun < 30_000) return;
+        lastRun = now;
+      }
+
+      // Fail-safe: if we can't reach the server, don't skip a pending relock.
+      let locked = false;
+      let hasLock = true;
+      try {
+        ({ locked, hasLock } = await ensureLockAction());
+      } catch {
+        // Unreachable in practice (the action handles its own errors).
+      }
+
+      if (locked || (hasFlag && hasLock)) {
         try {
           await relock();
         } catch {
-          // Keep the flag; retried on the next boot/foreground.
+          // Offline: the flag stays put; retried on the next boot/foreground.
         }
-        return;
-      }
-
-      const now = Date.now();
-      if (now - lastRun < 30_000) return;
-      lastRun = now;
-      try {
-        const { locked } = await ensureLockAction();
-        // Deliberately NOT gated on effect-alive: in dev StrictMode the first
-        // instance's response arrives after its cleanup, and dropping the
-        // guard (landing on /lock is always safe) keeps the bounce reliable.
-        if (locked && !window.location.pathname.startsWith("/lock")) {
-          window.location.replace(lockUrl());
-        }
-      } catch {
-        // Best-effort — the proxy still gates every navigation.
+      } else if (hasFlag) {
+        // Stale flag on an account with no lock configured — clear it so
+        // cold starts don't bounce through /lock for nothing.
+        clearRelockFlag();
       }
     }
 
@@ -160,8 +166,9 @@ function ConnectedShell({
         void relock().catch(() => {});
         return;
       }
-      // Quick switch under the grace period — stay unlocked.
-      if (hiddenAt) localStorage.removeItem(RELOCK_FLAG_KEY);
+      // Quick switch under the grace period — stay unlocked. Clears both
+      // flag mirrors (a cookie-only flag must not lock the next cold start).
+      clearRelockFlag();
       void check();
     }
 

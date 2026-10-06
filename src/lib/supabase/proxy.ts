@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSupabaseConfig } from "./config";
-import { readLockState } from "@/lib/app-lock";
+import { readLockState, RELOCK_FLAG_COOKIE } from "@/lib/app-lock";
 
 const PUBLIC_PATHS = ["/login", "/signup"];
 
@@ -97,7 +97,14 @@ export async function updateSession(request: NextRequest) {
         (name) => request.cookies.get(name)?.value,
         user.id
       );
-      if (lock.required && !lock.unlocked) {
+      // The relock flag mirrors the shell's "closed from the background"
+      // localStorage flag: the unlock cookie may survive closing the app
+      // (mobile keeps its process alive; desktop restores sessions), so
+      // without this check the homepage would paint before the client could
+      // bounce to /lock. NOT cleared here — it must keep gating every open
+      // until the user actually unlocks (which clears it).
+      const relockFlag = request.cookies.get(RELOCK_FLAG_COOKIE)?.value;
+      if (lock.required && (!lock.unlocked || Boolean(relockFlag))) {
         const lockUrl = request.nextUrl.clone();
         lockUrl.pathname = "/lock";
         lockUrl.search = `?next=${encodeURIComponent(pathname + request.nextUrl.search)}`;

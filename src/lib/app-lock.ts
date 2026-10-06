@@ -15,8 +15,13 @@
  *                     session ends, which is the primary "closed the app"
  *                     signal. Its signed payload still expires after
  *                     LOCK_OK_TTL_SECONDS as an absolute cap, and the shell
- *                     force-relocks on background/kill via a localStorage
- *                     flag (see chat-shell).
+ *                     force-relocks on background/kill via a relock flag
+ *                     (see chat-shell).
+ *   chatter-relock    "the app was closed from the background" — JS-set mirror
+ *                     of the shell's localStorage relock flag, so the proxy
+ *                     can redirect to /lock on the FIRST document request
+ *                     instead of letting the homepage paint and bouncing
+ *                     client-side a beat later.
  */
 
 export const LOCK_REQ_COOKIE = "chatter-lock-req";
@@ -42,6 +47,50 @@ export const RELOCK_GRACE_MS_DESKTOP = 30_000;
  *  tell it was closed from the background (works even if the process is
  *  killed before any async cleanup can run). */
 export const RELOCK_FLAG_KEY = "chatter-relock";
+
+/**
+ * Cookie mirror of the localStorage flag (same name, JS-set, not HttpOnly).
+ * localStorage is invisible to the proxy; without this cookie a surviving
+ * unlock cookie would let the homepage render before the client bounced to
+ * /lock. Explicit Max-Age (not a session cookie) so it survives browser
+ * restarts and outlives any pre-fix 12h persistent unlock cookies.
+ * Set/cleared together with the localStorage flag — see set/clearRelockFlag.
+ */
+export const RELOCK_FLAG_COOKIE = "chatter-relock";
+export const RELOCK_FLAG_COOKIE_MAX_AGE = 7 * 24 * 60 * 60;
+
+/** Client-only: set the relock flag in BOTH stores (localStorage for this
+ *  document's checks, cookie for the proxy's pre-render gate). */
+export function setRelockFlag() {
+  const ts = String(Date.now());
+  try {
+    localStorage.setItem(RELOCK_FLAG_KEY, ts);
+  } catch {
+    // Storage unavailable (private mode) — the cookie below still applies.
+  }
+  try {
+    document.cookie = `${RELOCK_FLAG_COOKIE}=${ts}; path=/; max-age=${RELOCK_FLAG_COOKIE_MAX_AGE}${
+      window.location.protocol === "https:" ? "; Secure" : ""
+    }`;
+  } catch {
+    // Cookies unavailable — the localStorage flag still applies at boot.
+  }
+}
+
+/** Client-only: clear both mirrors (unlock succeeded / quick switch back
+ *  within the grace period). */
+export function clearRelockFlag() {
+  try {
+    localStorage.removeItem(RELOCK_FLAG_KEY);
+  } catch {
+    // Storage unavailable — harmless.
+  }
+  try {
+    document.cookie = `${RELOCK_FLAG_COOKIE}=; path=/; max-age=0`;
+  } catch {
+    // Cookies unavailable — harmless.
+  }
+}
 
 const PBKDF2_ITERATIONS = 600_000;
 const enc = new TextEncoder();

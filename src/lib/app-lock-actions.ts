@@ -9,6 +9,7 @@ import {
   LOCK_REQ_COOKIE,
   LOCK_REQ_TTL_SECONDS,
   PIN_PATTERN,
+  RELOCK_FLAG_COOKIE,
   hashPasscode,
   lockCookieOptions,
   readLockState,
@@ -66,6 +67,8 @@ async function setLockCookies(userId: string) {
   store.set(LOCK_REQ_COOKIE, req.value, lockCookieOptions(req.maxAge));
   // No maxAge: session-scoped, so closing the app/browser drops the unlock.
   store.set(LOCK_OK_COOKIE, ok.value, lockCookieOptions());
+  // Just unlocked — the "closed from background" flag is stale now.
+  store.delete(RELOCK_FLAG_COOKIE);
 }
 
 async function setOkCookie(userId: string) {
@@ -73,11 +76,14 @@ async function setOkCookie(userId: string) {
   const ok = await signLockCookie("ok", userId, LOCK_OK_TTL_SECONDS);
   // No maxAge: session-scoped, so closing the app/browser drops the unlock.
   store.set(LOCK_OK_COOKIE, ok.value, lockCookieOptions());
+  // Just unlocked — the "closed from background" flag is stale now.
+  store.delete(RELOCK_FLAG_COOKIE);
 }
 
 function clearLockCookies(store: Awaited<ReturnType<typeof cookies>>) {
   store.delete(LOCK_REQ_COOKIE);
   store.delete(LOCK_OK_COOKIE);
+  store.delete(RELOCK_FLAG_COOKIE);
 }
 
 /** Read + verify the current passcode against the stored hash (throttled). */
@@ -238,11 +244,17 @@ export async function recoverAction(password: string): Promise<LockActionResult>
 /**
  * Self-healing check run by the shell on boot and when the app is
  * foregrounded: other devices with a live session learn about a lock that
- * was enabled elsewhere, and stale hints are cleared after it's disabled.
+ * was enabled elsewhere, and stale hints/flags are cleared after it's
+ * disabled. `hasLock` lets the shell tell a real pending relock apart from
+ * a stale flag on a lock-less account (so those users don't bounce through
+ * /lock on every cold start).
  */
-export async function ensureLockAction(): Promise<{ locked: boolean }> {
+export async function ensureLockAction(): Promise<{
+  locked: boolean;
+  hasLock: boolean;
+}> {
   const user = await getCurrentUser();
-  if (!user) return { locked: false };
+  if (!user) return { locked: false, hasLock: false };
 
   try {
     const store = await cookies();
@@ -250,19 +262,25 @@ export async function ensureLockAction(): Promise<{ locked: boolean }> {
     const hash = await readPasscodeHash(user.id);
 
     if (!hash) {
-      if (state.required || store.get(LOCK_OK_COOKIE)) clearLockCookies(store);
-      return { locked: false };
+      if (
+        state.required ||
+        store.get(LOCK_OK_COOKIE) ||
+        store.get(RELOCK_FLAG_COOKIE)
+      ) {
+        clearLockCookies(store);
+      }
+      return { locked: false, hasLock: false };
     }
 
     if (!state.required) {
       const req = await signLockCookie("req", user.id, LOCK_REQ_TTL_SECONDS);
       store.set(LOCK_REQ_COOKIE, req.value, lockCookieOptions(req.maxAge));
     }
-    return { locked: !state.unlocked };
+    return { locked: !state.unlocked, hasLock: true };
   } catch (error) {
     // Missing APP_LOCK_SECRET — the proxy fails closed on the next request.
     console.error("app-lock ensure:", error);
-    return { locked: false };
+    return { locked: false, hasLock: true };
   }
 }
 
