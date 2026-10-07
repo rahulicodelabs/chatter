@@ -47,9 +47,9 @@ self.addEventListener("push", (event) => {
   if (!data || typeof data.title !== "string" || !data.title) return;
 
   const fresh = Date.now() - pageState.at < STATE_FRESH_MS;
+  const appOnScreen = fresh && pageState.visible;
   if (
-    fresh &&
-    pageState.visible &&
+    appOnScreen &&
     pageState.conversationId &&
     pageState.conversationId === data.conversationId
   ) {
@@ -68,7 +68,7 @@ self.addEventListener("push", (event) => {
   };
   if (typeof data.image === "string" && data.image) options.image = data.image;
 
-  event.waitUntil(
+  const tasks = [
     self.registration.showNotification(data.title, options).then(
       () => {
         console.log(
@@ -83,8 +83,45 @@ self.addEventListener("push", (event) => {
       (error) => {
         console.error("sw: showNotification failed:", error);
       }
-    )
-  );
+    ),
+  ];
+
+  // Icon badge with the app closed/backgrounded: the payload carries the
+  // recipient's unread total (computed by the notify trigger). While a page
+  // of the app IS visible it owns the badge — syncing here would race its
+  // own unread bookkeeping. The Badging API lives on WorkerNavigator in
+  // Chromium (self.registration in older Safari) — probe both.
+  const badgeTarget =
+    typeof navigator !== "undefined" && typeof navigator.setAppBadge === "function"
+      ? navigator
+      : typeof self.registration.setAppBadge === "function"
+        ? self.registration
+        : null;
+  if (
+    !appOnScreen &&
+    badgeTarget &&
+    typeof data.unread === "number" &&
+    Number.isFinite(data.unread)
+  ) {
+    const unread = Math.max(0, Math.floor(data.unread));
+    const request =
+      unread > 0
+        ? badgeTarget.setAppBadge(unread)
+        : typeof badgeTarget.clearAppBadge === "function"
+          ? badgeTarget.clearAppBadge()
+          : badgeTarget.setAppBadge(0);
+    tasks.push(
+      request
+        .then(() => {
+          console.log("sw: badge set:", unread);
+        })
+        .catch((error) => {
+          console.warn("sw: badge failed:", error);
+        })
+    );
+  }
+
+  event.waitUntil(Promise.all(tasks));
 });
 
 self.addEventListener("notificationclick", (event) => {

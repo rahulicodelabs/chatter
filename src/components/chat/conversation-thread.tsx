@@ -71,6 +71,15 @@ export function ConversationThread({
   const messageIdsRef = useRef<Set<string>>(
     new Set(initialMessages.map((m) => m.id))
   );
+  // Latest state for the visibility sweep (see the listener below).
+  const messagesRef = useRef(messages);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+  const receiptsRef = useRef(receipts);
+  useEffect(() => {
+    receiptsRef.current = receipts;
+  }, [receipts]);
 
   const label = conversationLabel(conversation);
   const other = members.find((m) => m.profile?.id !== user.id)?.profile;
@@ -88,8 +97,11 @@ export function ConversationThread({
 
   // Opening the thread: clear the unread badge, load receipts, and record
   // delivery + read for any incoming messages we haven't acknowledged yet.
+  // Read receipts are gated on visibility: a background/restored tab must
+  // not turn the sender's ticks blue — the sweep listener below does that
+  // once the tab is actually on screen.
   useEffect(() => {
-    markRead(conversation.id);
+    if (document.visibilityState === "visible") markRead(conversation.id);
 
     const supabase = createClient();
     let cancelled = false;
@@ -115,7 +127,11 @@ export function ConversationThread({
         )
         .map((m) => m.id);
 
-      if (needsMarking.length > 0) {
+      if (
+        needsMarking.length > 0 &&
+        !cancelled &&
+        document.visibilityState === "visible"
+      ) {
         const now = new Date().toISOString();
         const { data: saved } = await supabase
           .from("message_deliveries")
@@ -184,8 +200,13 @@ export function ConversationThread({
               ? prev
               : [...prev, { ...incoming, sender }]
           );
-          if (incoming.sender_id !== user.id) {
-            // On screen ⇒ delivered and read immediately.
+          if (
+            incoming.sender_id !== user.id &&
+            document.visibilityState === "visible"
+          ) {
+            // On screen ⇒ delivered and read immediately. A hidden tab only
+            // gets "delivered" (chat-shell) — the sweep listener below
+            // records the read when the tab comes back into view.
             markRead(conversation.id);
             const now = new Date().toISOString();
             supabase
@@ -233,6 +254,45 @@ export function ConversationThread({
       cancelled = true;
       if (createdChannel) void supabase.removeChannel(createdChannel);
     };
+  }, [conversation.id, markRead, user.id]);
+
+  // A thread that was hidden while messages arrived (background tab, app in
+  // the background, tab restored on startup) must acknowledge them when it
+  // is actually shown again — this is the only other place read receipts
+  // are written, so blue ticks always mean "the recipient had it on screen".
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      const readIds = new Set(
+        receiptsRef.current
+          .filter((r) => r.user_id === user.id && r.read_at)
+          .map((r) => r.message_id)
+      );
+      const pending = messagesRef.current.filter(
+        (m) => m.sender_id !== user.id && !readIds.has(m.id)
+      );
+      if (pending.length === 0) return;
+
+      markRead(conversation.id);
+      const now = new Date().toISOString();
+      createClient()
+        .from("message_deliveries")
+        .upsert(
+          pending.map((m) => ({
+            message_id: m.id,
+            user_id: user.id,
+            delivered_at: now,
+            read_at: now,
+          })),
+          { onConflict: "message_id,user_id" }
+        )
+        .then(({ error }) => {
+          if (error) console.error("Failed to record read:", error.message);
+        });
+    };
+
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
   }, [conversation.id, markRead, user.id]);
 
   // Keep the view pinned to the newest message.

@@ -1,66 +1,16 @@
--- Chatter — push notifications ("notify me when the app is closed")
--- Run this in the Supabase SQL Editor (Dashboard → SQL Editor → New query).
--- Prerequisite: app-lock.sql has already run (it adds profiles.passcode_hash).
+-- Chatter — app-icon badge support for push notifications.
+-- Run this ONLY if you already ran push-notifications.sql before the badge
+-- feature existed (it just re-creates the trigger function; nothing else
+-- changes and no data is touched). Fresh setups: push-notifications.sql
+-- already contains this.
 --
--- What this adds:
---   1. push_subscriptions — one row per browser/device that opted in through
---      the app's "Notifications" toggle (RLS: strictly your own rows).
---   2. A trigger on messages INSERT that, once the insert commits, POSTs a
---      fan-out payload to the app's /api/push route using pg_net.
---
--- Failure safety: pg_net queues the request until COMMIT (nothing is sent
--- mid-transaction) and the entire trigger body sits in an exception handler,
--- so a broken notification pipeline only logs a warning — it can never stop
--- a message from being sent.
-
--- ============================================================
--- 1. Subscriptions
--- ============================================================
-create table if not exists public.push_subscriptions (
-  user_id uuid not null references auth.users (id) on delete cascade,
-  endpoint text primary key,   -- the browser's push endpoint (FCM)
-  p256dh text not null,        -- per-subscription encryption keys
-  auth text not null,
-  created_at timestamptz not null default now()
-);
-
-create index if not exists push_subscriptions_user_id_idx
-  on public.push_subscriptions (user_id);
-
-alter table public.push_subscriptions enable row level security;
-
-drop policy if exists "Users can read own subscriptions" on public.push_subscriptions;
-create policy "Users can read own subscriptions"
-  on public.push_subscriptions for select to authenticated
-  using (user_id = auth.uid());
-
-drop policy if exists "Users can insert own subscriptions" on public.push_subscriptions;
-create policy "Users can insert own subscriptions"
-  on public.push_subscriptions for insert to authenticated
-  with check (user_id = auth.uid());
-
--- ON CONFLICT (endpoint) upsert. USING (true) lets a signed-in account claim
--- an endpoint it physically holds — e.g. after switching accounts on the same
--- browser — while WITH CHECK still forces the row to end up owned by them.
--- Endpoints are long random FCM URLs and never readable for other users
--- (select is own-rows only), so this can't be used to steal anyone's row.
-drop policy if exists "Users can claim endpoints they hold" on public.push_subscriptions;
-create policy "Users can claim endpoints they hold"
-  on public.push_subscriptions for update to authenticated
-  using (true)
-  with check (user_id = auth.uid());
-
-drop policy if exists "Users can delete own subscriptions" on public.push_subscriptions;
-create policy "Users can delete own subscriptions"
-  on public.push_subscriptions for delete to authenticated
-  using (user_id = auth.uid());
-
-grant select, insert, update, delete on public.push_subscriptions to authenticated;
-
--- ============================================================
--- 2. Trigger: message inserted → POST /api/push (async via pg_net)
--- ============================================================
-create extension if not exists pg_net with schema "extensions";
+-- What's new: every recipient in the fan-out payload now carries `unread`,
+-- their total unread message count (same predicate as
+-- conversation_summaries.unread_count — computed AFTER INSERT, so it
+-- includes the message being sent). sw.js passes it to the Badging API to
+-- put a dot/number on the installed app's icon while the app is closed.
+-- If this step is skipped, everything else keeps working — badges simply
+-- stay absent until it runs.
 
 create or replace function public.notify_message_push()
 returns trigger
@@ -159,12 +109,6 @@ begin
   return new;
 end;
 $$;
-
-drop trigger if exists message_push_notify on public.messages;
-create trigger message_push_notify
-  after insert on public.messages
-  for each row
-  execute function public.notify_message_push();
 
 comment on function public.notify_message_push() is
   'After a message commits, POSTs a fan-out payload (incl. per-recipient unread counts for the icon badge) to /api/push via pg_net. Failures log a warning only.';

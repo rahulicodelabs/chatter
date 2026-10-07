@@ -19,6 +19,8 @@ type PushRecipient = {
   auth: string;
   /** Recipient has app lock on → notification may only show the sender. */
   locked: boolean;
+  /** Recipient's total unread messages — drives the app-icon badge. */
+  unread?: number | null;
 };
 
 /** Fan-out payload POSTed by notify_message_push(). */
@@ -39,6 +41,8 @@ type NotificationPayload = {
   image: string | null;
   conversationId: string;
   url: string;
+  /** Recipient's unread total for the icon badge (null when unknown). */
+  unread: number | null;
 };
 
 const SECRET_HEADER = "x-chatter-push-secret";
@@ -92,7 +96,12 @@ function isPushPayload(value: unknown): value is PushPayload {
       recipient.p256dh.length > 10 &&
       typeof recipient.auth === "string" &&
       recipient.auth.length > 10 &&
-      typeof recipient.locked === "boolean"
+      typeof recipient.locked === "boolean" &&
+      (recipient.unread === undefined ||
+        recipient.unread === null ||
+        (typeof recipient.unread === "number" &&
+          Number.isFinite(recipient.unread) &&
+          recipient.unread >= 0))
   );
 }
 
@@ -105,17 +114,23 @@ function buildNotification(
   const url = `/chat/${conversationId}`;
   const sender = (payload.sender_name || "Someone").slice(0, 80);
   const preview = (payload.preview || "New message").slice(0, 200);
+  // Badge count carried through for sw.js (null when the trigger predates
+  // the unread column or the value was malformed).
+  const unread =
+    typeof recipient.unread === "number" && Number.isFinite(recipient.unread)
+      ? Math.max(0, Math.floor(recipient.unread))
+      : null;
 
   if (recipient.locked) {
     // App lock on: reveal only WHO sent it — content stays behind the PIN.
-    return { title: sender, body: "New message", image: null, conversationId, url };
+    return { title: sender, body: "New message", image: null, conversationId, url, unread };
   }
 
   const image =
     payload.image_url && !VIDEO_EXT.test(payload.image_url) ? payload.image_url : null;
 
   if (payload.conversation_type === "dm") {
-    return { title: sender, body: preview, image, conversationId, url };
+    return { title: sender, body: preview, image, conversationId, url, unread };
   }
   const group = (payload.conversation_title || "Group chat").slice(0, 80);
   return {
@@ -124,6 +139,7 @@ function buildNotification(
     image,
     conversationId,
     url,
+    unread,
   };
 }
 

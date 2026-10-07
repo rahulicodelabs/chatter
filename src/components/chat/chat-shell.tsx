@@ -5,6 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { syncUnreadBadge } from "@/lib/badge";
 import { normalizeMembers } from "@/lib/members";
 import { isVideoMessage } from "@/lib/attachments";
 import { ChatContext } from "@/components/chat/chat-context";
@@ -260,6 +261,17 @@ function ConnectedShell({
     },
     [membersByConversation, user.id]
   );
+
+  // Icon badge (iOS home screen / desktop installed PWA) + retiring
+  // notifications for conversations already read (drives Android's
+  // automatic launcher dot). Re-syncs on every list change and whenever
+  // the app comes back to the foreground.
+  useEffect(() => {
+    const sync = () => syncUnreadBadge(conversations);
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => document.removeEventListener("visibilitychange", sync);
+  }, [conversations]);
 
   // Latest conversation ids for the realtime callback without re-subscribing.
   const idSetRef = useRef<Set<string>>(new Set());

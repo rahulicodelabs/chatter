@@ -138,10 +138,21 @@ export async function enablePush(): Promise<void> {
   let subscription = await registration.pushManager.getSubscription();
   const fresh = subscription === null;
   if (!subscription) {
-    subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(key),
-    });
+    try {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(key),
+      });
+    } catch (error) {
+      // Brave ships "Use Google services for push messaging" (brave.gcm) off
+      // by default, which makes subscribe() fail with this opaque exception.
+      if (error instanceof Error && /push service error/i.test(error.message)) {
+        throw new Error(
+          'The browser blocked its push service. Brave users: enable "Use Google services for push messaging" in brave://settings/privacy, then restart the browser.'
+        );
+      }
+      throw error;
+    }
   }
   try {
     await upsertSubscription(subscription);
