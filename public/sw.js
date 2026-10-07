@@ -54,6 +54,7 @@ self.addEventListener("push", (event) => {
     pageState.conversationId === data.conversationId
   ) {
     // The user is already reading this conversation — skip the banner.
+    console.log("sw: push suppressed (chat open)", data.conversationId);
     return;
   }
 
@@ -67,7 +68,23 @@ self.addEventListener("push", (event) => {
   };
   if (typeof data.image === "string" && data.image) options.image = data.image;
 
-  event.waitUntil(self.registration.showNotification(data.title, options));
+  event.waitUntil(
+    self.registration.showNotification(data.title, options).then(
+      () => {
+        console.log(
+          "sw: notification shown:",
+          data.title,
+          "—",
+          data.body,
+          "conv",
+          data.conversationId
+        );
+      },
+      (error) => {
+        console.error("sw: showNotification failed:", error);
+      }
+    )
+  );
 });
 
 self.addEventListener("notificationclick", (event) => {
