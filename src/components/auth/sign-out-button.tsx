@@ -2,11 +2,15 @@
 
 import { useRouter } from "next/navigation";
 import { signOutAction } from "@/lib/app-lock-actions";
+import { disablePush } from "@/lib/push";
 
 export function SignOutButton() {
   const router = useRouter();
 
   async function signOut() {
+    // Best-effort: drop this device's push subscription (but not the
+    // device-level opt-out flag) so the next account starts clean.
+    await disablePush({ remember: false });
     try {
       await signOutAction();
     } finally {

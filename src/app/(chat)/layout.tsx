@@ -1,4 +1,5 @@
 import { ChatShell } from "@/components/chat/chat-shell";
+import { PushSetup } from "@/components/push/push-setup";
 
 /**
  * Deliberately synchronous — no awaits, no Supabase round trips.
@@ -14,5 +15,12 @@ import { ChatShell } from "@/components/chat/chat-shell";
  * verify with getUser(), and RLS protects every row regardless.
  */
 export default function ChatLayout({ children }: { children: React.ReactNode }) {
-  return <ChatShell>{children}</ChatShell>;
+  return (
+    <>
+      {/* Registers the push service worker and tracks which conversation is
+          on screen (for suppressing notifications you're already reading). */}
+      <PushSetup />
+      <ChatShell>{children}</ChatShell>
+    </>
+  );
 }

@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import Link from "next/link";
 import { Avatar } from "@/components/chat/avatar";
 import { SignOutButton } from "@/components/auth/sign-out-button";
+import { NotificationsToggle } from "@/components/push/notifications-toggle";
 import type { PublicProfile } from "@/lib/types";
 
 /** Left slide-over with the signed-in account's profile and sign-out actions. */
@@ -74,6 +75,7 @@ export function AccountDrawer({
           >
             App lock
           </button>
+          <NotificationsToggle />
         </div>
 
         <div className="border-t border-border p-4">
